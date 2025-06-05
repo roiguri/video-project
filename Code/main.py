@@ -39,7 +39,7 @@ def main():
         # Phase 1: Video Stabilization
         print("\n--- Phase 1: Video Stabilization ---")
         stabilizer = VideoStabilizer()
-        stabilizer.stabilize(input_video, output_files['stabilized'])
+        stabilizer.stabilize_video(input_video, output_files['stabilized'])
         processor.record_timing('stabilize')
         
         # Phase 2: Background Subtraction
