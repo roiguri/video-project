@@ -150,7 +150,6 @@ class VideoMatter(VideoProcessor):
     def apply_matting(self, extracted_path: str, binary_path: str, 
                      background_path: str, matted_path: str, alpha_path: str):
         """Apply streaming image matting to avoid memory issues"""
-        print("=== Streaming Image Matting Started ===")
         start_time = time.time()
         
         # Open video captures
@@ -169,15 +168,13 @@ class VideoMatter(VideoProcessor):
             raise ValueError(f"Could not read background image: {background_path}")
         background = cv2.resize(background, (width, height))
         
-        print(f"Processing {total_frames} frames for matting (streaming mode)...")
-        
         # Initialize video writers
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
         matted_writer = cv2.VideoWriter(matted_path, fourcc, fps, (width, height))
         alpha_writer = cv2.VideoWriter(alpha_path, fourcc, fps, (width, height))
         
         # Process frames one by one
-        for frame_idx in range(total_frames):
+        for frame_idx in tqdm(range(total_frames), desc="Matting frames", leave=False, ncols=80):
             # Read one frame at a time
             ret1, extracted_frame = cap_extracted.read()
             ret2, binary_frame = cap_binary.read()
@@ -202,10 +199,6 @@ class VideoMatter(VideoProcessor):
             # Clear variables immediately
             del trimap, alpha, matted_frame, alpha_3ch, extracted_frame, binary_frame
             
-            # Progress update
-            if frame_idx % 10 == 0:
-                print(f"Processed {frame_idx+1}/{total_frames} frames")
-            
             # Force garbage collection every 20 frames
             if frame_idx % 20 == 0:
                 import gc
@@ -217,7 +210,4 @@ class VideoMatter(VideoProcessor):
         matted_writer.release()
         alpha_writer.release()
         
-        total_time = time.time() - start_time
-        print(f"=== Image Matting Complete! Total time: {total_time:.2f}s ===")
-        print(f"Matted video saved: {matted_path}")
-        print(f"Alpha channel saved: {alpha_path}") 
+        total_time = time.time() - start_time 

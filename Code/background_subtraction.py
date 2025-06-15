@@ -35,16 +35,13 @@ class BackgroundSubtractor(VideoProcessor):
     
     def get_initial_mask(self, frames):
         """Create initial mask using KNN background subtractor"""
-        print("Creating initial masks using KNN background subtractor...")
-        
         fgbg = cv2.createBackgroundSubtractorKNN()
         frames_mask = []
         
         for iteration in range(self.max_iterations):
-            print(f"  Iteration {iteration + 1}/{self.max_iterations}")
             iteration_masks = []
             
-            for frame in tqdm(frames, desc=f"Processing frames (iter {iteration + 1})"):
+            for frame in tqdm(frames, desc=f"KNN iteration {iteration + 1}/{self.max_iterations}", leave=False, ncols=80):
                 # Convert to HSV and use only Saturation and Value channels
                 transformed_frame_HSV = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                 frame_sv = transformed_frame_HSV[:, :, 1:]  # S and V channels
@@ -60,8 +57,6 @@ class BackgroundSubtractor(VideoProcessor):
     
     def improve_mask(self, frames, frames_mask):
         """Improve masks using morphological operations and blue channel filtering"""
-        print("Improving masks with morphological operations...")
-        
         frame_count = len(frames)
         background_values = np.empty((self.how_many_background * frame_count, 3))
         foreground_values = np.empty((self.how_many_foreground * frame_count, 3))
@@ -70,7 +65,7 @@ class BackgroundSubtractor(VideoProcessor):
         start_background = 0
         improved_masks = []
         
-        for index_frame, frame in enumerate(tqdm(frames, desc="Improving masks")):
+        for index_frame, frame in enumerate(tqdm(frames, desc="Improving masks", leave=False, ncols=80)):
             mask = frames_mask[index_frame]
             blue_frame, _, _ = cv2.split(frame)
             
@@ -112,8 +107,6 @@ class BackgroundSubtractor(VideoProcessor):
     
     def get_binary_and_extracted_frames(self, frames, frames_mask, background_values, foreground_values):
         """Generate final binary and extracted frames using KDE like reference implementation"""
-        print("Generating final binary and extracted frames using KDE...")
-        
         # Create KDE probability distributions exactly like reference
         pdf_foreground = gaussian_kde(np.asarray(foreground_values).T, bw_method=0.95)
         pdf_background = gaussian_kde(np.asarray(background_values).T, bw_method=0.95)
@@ -161,42 +154,29 @@ class BackgroundSubtractor(VideoProcessor):
     
     def subtract_background(self, input_video_path, background_img_path, extracted_output_path, binary_output_path):
         """Main background subtraction function using the reference implementation approach"""
-        print("=== Background Subtraction Started ===")
         start_time = time.time()
         
         # Set random seed for reproducibility
         np.random.seed(0)
         
         # Read video frames
-        print("Reading video frames...")
         frames, metadata = self.read_video(input_video_path)
         
         if not frames:
             raise ValueError(f"No frames found in {input_video_path}")
         
-        print(f"Processing {len(frames)} frames...")
-        
-        print("Step 1/4: Initializing variables")
-        # Initialize variables done
-        
-        print("Step 2/4: Creating initial masks")
+        # Step 1: Create initial masks
         initial_masks = self.get_initial_mask(frames)
         
-        print("Step 3/4: Improving masks")
+        # Step 2: Improve masks
         improved_masks, background_values, foreground_values = self.improve_mask(frames, initial_masks)
         
-        print("Step 4/4: Writing output videos")
+        # Step 3: Generate final frames
         extracted_frames, binary_frames = self.get_binary_and_extracted_frames(
             frames, improved_masks, background_values, foreground_values)
         
         # Save output videos
-        print("Saving output videos...")
         self.write_video(extracted_frames, extracted_output_path, metadata['fps'])
         self.write_video(binary_frames, binary_output_path, metadata['fps'])
-        
-        total_time = time.time() - start_time
-        print(f"=== Background Subtraction Complete! Total time: {total_time:.2f}s ===")
-        print(f"Extracted video saved: {extracted_output_path}")
-        print(f"Binary video saved: {binary_output_path}")
         
         return binary_frames, extracted_frames

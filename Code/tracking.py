@@ -35,12 +35,10 @@ class PersonTracker(VideoProcessor):
     
     def get_box_list_from_binary_video(self, binary_video_path):
         """Extract bounding boxes from all frames in binary video"""
-        print("Extracting bounding boxes from binary video...")
-        
         frames, _ = self.read_video(binary_video_path)
         box_list = []
         
-        for frame in tqdm(frames, desc="Processing binary frames"):
+        for frame in tqdm(frames, desc="Extracting bounding boxes", leave=False, ncols=80):
             # Convert to grayscale if needed
             if len(frame.shape) == 3:
                 gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -67,7 +65,6 @@ class PersonTracker(VideoProcessor):
     
     def track_person(self, input_path: str, output_path: str):
         """Track person using binary video bounding boxes applied to matted video"""
-        print("=== Person Tracking with Binary Box Method Started ===")
         start_time = time.time()
         
         # Get bounding boxes from binary video
@@ -80,15 +77,13 @@ class PersonTracker(VideoProcessor):
         if not matted_frames:
             raise ValueError(f"No frames found in {input_path}")
         
-        print(f"Applying {len(box_list)} bounding boxes to {len(matted_frames)} frames...")
-        
         tracking_results = {}
         output_frames = []
         
         # Apply bounding boxes to matted frames
         n_frames = min(len(matted_frames), len(box_list))
         
-        for frame_idx in tqdm(range(n_frames), desc="Tracking frames"):
+        for frame_idx in tqdm(range(n_frames), desc="Tracking frames", leave=False, ncols=80):
             frame = matted_frames[frame_idx]
             bbox = box_list[frame_idx]
             
@@ -108,8 +103,6 @@ class PersonTracker(VideoProcessor):
         self.write_video(output_frames, output_path, metadata['fps'])
         
         total_time = time.time() - start_time
-        print(f"=== Person Tracking Complete! Total time: {total_time:.2f}s ===")
-        print(f"Tracked video saved: {output_path}")
         
         return tracking_results
     

@@ -57,8 +57,6 @@ class VideoStabilizer(VideoProcessor):
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
 
-        print(f"[INFO] Stabilizing {n} frames …")
-
         _, prev = cap.read()
         if prev is None:
             raise ValueError("Could not read first frame from video")
@@ -66,7 +64,8 @@ class VideoStabilizer(VideoProcessor):
         prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
         transforms = []
 
-        for i in range(n - 1):
+        # Motion estimation phase
+        for i in tqdm(range(n - 1), desc="Motion estimation", leave=False, ncols=80):
             ok, curr = cap.read()
             if not ok:
                 break
@@ -88,23 +87,21 @@ class VideoStabilizer(VideoProcessor):
 
             transforms.append(H)
             prev_gray = curr_gray
-            if i % 20 == 0:
-                print(f"[INFO]   motion processed {i}/{n}")
 
-        # Smooth trajectory ---------------------------------------------------------
+        # Smooth trajectory
         cumulative = [np.eye(3)]
         for H in transforms:
             cumulative.append(H @ cumulative[-1])
         smooth = self.smooth_homographies(cumulative, smoothing_radius)
 
-        # Write stabilized video ----------------------------------------------------
+        # Write stabilized video
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         _, frame0 = cap.read()
         fourcc = cv2.VideoWriter_fourcc(*"XVID")
         vw = cv2.VideoWriter(out, fourcc, fps, (w, h))
         vw.write(frame0)
 
-        for i in range(1, n):
+        for i in tqdm(range(1, n), desc="Writing stabilized video", leave=False, ncols=80):
             ok, f = cap.read()
             if not ok:
                 break
@@ -113,9 +110,6 @@ class VideoStabilizer(VideoProcessor):
                 f, Hcorr, (w, h), flags=VIDEO_INTERPOLATION_METHOD, borderMode=VIDEO_BORDER_MODE
             )
             vw.write(stab)
-            if i % 20 == 0:
-                print(f"[INFO]   stabilized frame {i}/{n}")
 
         cap.release()
         vw.release()
-        print("[INFO] Stabilization complete.")
