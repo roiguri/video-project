@@ -37,19 +37,36 @@ def main():
         }
                 
         # Phase 1: Video Stabilization
-        # print("\n--- Phase 1: Video Stabilization ---")
-        # stabilizer = VideoStabilizer()
-        # stabilizer.stabilize_video(input_video, output_files['stabilized'])
-        # processor.record_timing('stabilize')
+        print("\n--- Phase 1: Video Stabilization ---")
+        stabilizer = VideoStabilizer()
+        stabilizer.stabilize_video(
+            input_video,
+            output_files['stabilized']
+        )
+        processor.record_timing('stabilized')
         
-        # Phase 2: Background Subtraction (SKIPPED - using existing outputs)
-        print("\n--- Phase 2: Background Subtraction (SKIPPED) ---")
-        print("Using existing background subtraction outputs...")
+        # Phase 2: Background Subtraction
+        print("\n--- Phase 2: Background Subtraction ---")
+        bg_subtractor = BackgroundSubtractor()
+        bg_subtractor.subtract_background(
+            output_files['stabilized'],  # Use stabilized video as input
+            background_img,
+            output_files['extracted'],
+            output_files['binary']
+        )
+        processor.record_timing('extracted')
         processor.record_timing('binary')
         
-        # Phase 3: Image Matting (SKIPPED - using existing outputs)
-        print("\n--- Phase 3: Image Matting (SKIPPED) ---")
-        print("Using existing matting outputs...")
+        # Phase 3: Image Matting
+        print("\n--- Phase 3: Image Matting ---")
+        matter = VideoMatter()
+        matter.apply_matting(
+            output_files['extracted'],   # Use extracted video as input
+            output_files['binary'],      # Use binary mask
+            background_img,              # Background image
+            output_files['matted'],      # Generate matted video
+            output_files['alpha']        # Generate alpha channel
+        )
         processor.record_timing('matted')
         processor.record_timing('alpha')
         
@@ -60,11 +77,11 @@ def main():
             output_files['matted'],  # Use matted video as specified
             output_files['output']
         )
+        tracker.save_tracking_json('Outputs', tracking_results)
         processor.record_timing('OUTPUT')
         
-        # Save timing and tracking results
+        # Save timing results
         processor.save_timing_json('Outputs')
-        tracker.save_tracking_json('Outputs', tracking_results)
         
         total_time = time.time() - start_time
         print(f"\n=== Processing Complete! Total time: {total_time:.2f}s ===")
