@@ -42,43 +42,29 @@ def main():
         # stabilizer.stabilize_video(input_video, output_files['stabilized'])
         # processor.record_timing('stabilize')
         
-        # Phase 2: Background Subtraction
-        print("\n--- Phase 2: Background Subtraction ---")
-        bg_subtractor = BackgroundSubtractor()
-        bg_subtractor.extract_person(
-            output_files['stabilized'], 
-            output_files['extracted'],
-            output_files['binary']
-        )
+        # Phase 2: Background Subtraction (SKIPPED - using existing outputs)
+        print("\n--- Phase 2: Background Subtraction (SKIPPED) ---")
+        print("Using existing background subtraction outputs...")
         processor.record_timing('binary')
         
-        # Phase 3: Image Matting
-        # print("\n--- Phase 3: Image Matting ---")
-        # matter = VideoMatter()
-        # matter.apply_matting(
-        #     output_files['extracted'],
-        #     output_files['binary'],
-        #     background_img,
-        #     output_files['matted'],
-        #     output_files['alpha']
-        # )
-        # TODO: move this to the matting function
+        # Phase 3: Image Matting (SKIPPED - using existing outputs)
+        print("\n--- Phase 3: Image Matting (SKIPPED) ---")
+        print("Using existing matting outputs...")
         processor.record_timing('matted')
         processor.record_timing('alpha')
         
         # Phase 4: Person Tracking
-        # print("\n--- Phase 4: Person Tracking ---")
-        # tracker = PersonTracker()
-        # tracking_results = tracker.track_person(
-        #     output_files['matted'],
-        #     output_files['output']
-        # )
-        # TODO: move this to the tracking function
+        print("\n--- Phase 4: Person Tracking ---")
+        tracker = PersonTracker()
+        tracking_results = tracker.track_person(
+            output_files['matted'],  # Use matted video as specified
+            output_files['output']
+        )
         processor.record_timing('OUTPUT')
         
         # Save timing and tracking results
         processor.save_timing_json('Outputs')
-        # tracker.save_tracking_json('Outputs', tracking_results)
+        tracker.save_tracking_json('Outputs', tracking_results)
         
         total_time = time.time() - start_time
         print(f"\n=== Processing Complete! Total time: {total_time:.2f}s ===")

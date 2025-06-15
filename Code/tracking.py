@@ -3,59 +3,113 @@ import json
 import os
 import cv2
 import numpy as np
+from tqdm import tqdm
+import time
 
 class PersonTracker(VideoProcessor):
     def __init__(self):
         super().__init__()
     
+    def get_bounding_box_from_binary(self, binary_frame):
+        """Extract bounding box from binary frame by finding white pixels"""
+        # Find all white pixels (person pixels)
+        indices = np.argwhere(binary_frame == 255)
+        
+        if len(indices) == 0:
+            # No person found, return default box
+            return 100, 100, 200, 300
+        
+        # Get min/max coordinates
+        min_y = np.min(indices[:, 0])
+        max_y = np.max(indices[:, 0])
+        min_x = np.min(indices[:, 1])
+        max_x = np.max(indices[:, 1])
+        
+        # Convert to [row, col, height, width] format
+        row = min_y
+        col = min_x
+        height = max_y - min_y
+        width = max_x - min_x
+        
+        return row, col, height, width
+    
+    def get_box_list_from_binary_video(self, binary_video_path):
+        """Extract bounding boxes from all frames in binary video"""
+        print("Extracting bounding boxes from binary video...")
+        
+        frames, _ = self.read_video(binary_video_path)
+        box_list = []
+        
+        for frame in tqdm(frames, desc="Processing binary frames"):
+            # Convert to grayscale if needed
+            if len(frame.shape) == 3:
+                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                gray_frame = frame
+            
+            bbox = self.get_bounding_box_from_binary(gray_frame)
+            box_list.append(bbox)
+        
+        return box_list
+    
+    def draw_bounding_box(self, frame, bbox):
+        """Draw bounding box on frame"""
+        row, col, height, width = bbox
+        
+        # Draw rectangle
+        top_left = (col, row)
+        bottom_right = (col + width, row + height)
+        
+        frame_with_box = frame.copy()
+        cv2.rectangle(frame_with_box, top_left, bottom_right, (0, 255, 0), 2)
+        
+        return frame_with_box
+    
     def track_person(self, input_path: str, output_path: str):
-        """Track person and draw bounding boxes"""
-        print("Tracking: TODO - Implement in Phase 5")
-        # Placeholder implementation
+        """Track person using binary video bounding boxes applied to matted video"""
+        print("=== Person Tracking with Binary Box Method Started ===")
+        start_time = time.time()
         
-        frames, metadata = self.read_video(input_path)
+        # Get bounding boxes from binary video
+        binary_video_path = input_path.replace('matted', 'binary')
+        box_list = self.get_box_list_from_binary_video(binary_video_path)
         
-        # Create placeholder tracking results
+        # Read matted video frames
+        matted_frames, metadata = self.read_video(input_path)
+        
+        if not matted_frames:
+            raise ValueError(f"No frames found in {input_path}")
+        
+        print(f"Applying {len(box_list)} bounding boxes to {len(matted_frames)} frames...")
+        
         tracking_results = {}
-        
-        # Simple placeholder: create dummy bounding boxes
-        frame_height, frame_width = frames[0].shape[:2]
-        center_x, center_y = frame_width // 2, frame_height // 2
-        box_width, box_height = 100, 150
-        
         output_frames = []
         
-        for i, frame in enumerate(frames):
-            # Create dummy bounding box coordinates [ROW, COL, HEIGHT, WIDTH]
-            # Add slight movement for realistic placeholder
-            offset_x = int(5 * np.sin(i * 0.1))
-            offset_y = int(3 * np.cos(i * 0.1))
+        # Apply bounding boxes to matted frames
+        n_frames = min(len(matted_frames), len(box_list))
+        
+        for frame_idx in tqdm(range(n_frames), desc="Tracking frames"):
+            frame = matted_frames[frame_idx]
+            bbox = box_list[frame_idx]
             
-            row = center_y - box_height // 2 + offset_y
-            col = center_x - box_width // 2 + offset_x
-            
-            # Ensure bounding box stays within frame
-            row = max(0, min(row, frame_height - box_height))
-            col = max(0, min(col, frame_width - box_width))
-            
-            tracking_results[str(i)] = [row, col, box_height, box_width]
+            # Store tracking result
+            tracking_results[str(frame_idx)] = list(bbox)
             
             # Draw bounding box on frame
-            frame_with_box = frame.copy()
-            cv2.rectangle(frame_with_box, 
-                         (col, row), 
-                         (col + box_width, row + box_height), 
-                         (0, 255, 0), 2)
+            frame_with_box = self.draw_bounding_box(frame, bbox)
             
-            # Add frame number text
-            cv2.putText(frame_with_box, f"Frame {i}", 
-                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                       1, (0, 255, 0), 2)
+            # Add frame counter
+            cv2.putText(frame_with_box, f"Frame {frame_idx}", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
             output_frames.append(frame_with_box)
         
-        # Save output video with bounding boxes
+        # Save output video
         self.write_video(output_frames, output_path, metadata['fps'])
+        
+        total_time = time.time() - start_time
+        print(f"=== Person Tracking Complete! Total time: {total_time:.2f}s ===")
+        print(f"Tracked video saved: {output_path}")
         
         return tracking_results
     
@@ -64,4 +118,4 @@ class PersonTracker(VideoProcessor):
         tracking_path = os.path.join(output_dir, 'tracking.json')
         with open(tracking_path, 'w') as f:
             json.dump(tracking_results, f, indent=2)
-        print(f"Tracking data saved to {tracking_path}") 
+        print(f"Tracking data saved to {tracking_path}")
