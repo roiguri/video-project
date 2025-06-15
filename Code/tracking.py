@@ -92,8 +92,8 @@ class PersonTracker(VideoProcessor):
             frame = matted_frames[frame_idx]
             bbox = box_list[frame_idx]
             
-            # Store tracking result
-            tracking_results[str(frame_idx)] = list(bbox)
+            # Store tracking result (convert numpy int64 to regular int for JSON serialization)
+            tracking_results[str(frame_idx)] = [int(x) for x in bbox]
             
             # Draw bounding box on frame
             frame_with_box = self.draw_bounding_box(frame, bbox)

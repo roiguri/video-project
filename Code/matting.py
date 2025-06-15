@@ -149,45 +149,73 @@ class VideoMatter(VideoProcessor):
     
     def apply_matting(self, extracted_path: str, binary_path: str, 
                      background_path: str, matted_path: str, alpha_path: str):
-        """Apply advanced image matting with trimap and closed-form solution"""
-        print("=== Advanced Image Matting Started ===")
+        """Apply streaming image matting to avoid memory issues"""
+        print("=== Streaming Image Matting Started ===")
         start_time = time.time()
         
-        # Read input data
-        extracted_frames, metadata = self.read_video(extracted_path)
-        binary_frames, _ = self.read_video(binary_path)
+        # Open video captures
+        cap_extracted = cv2.VideoCapture(extracted_path)
+        cap_binary = cv2.VideoCapture(binary_path)
         
-        # Read background image
+        # Get video properties
+        fps = cap_extracted.get(cv2.CAP_PROP_FPS)
+        width = int(cap_extracted.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap_extracted.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap_extracted.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Read and resize background image
         background = cv2.imread(background_path)
         if background is None:
             raise ValueError(f"Could not read background image: {background_path}")
+        background = cv2.resize(background, (width, height))
         
-        print(f"Processing {len(extracted_frames)} frames for matting...")
+        print(f"Processing {total_frames} frames for matting (streaming mode)...")
         
-        matted_frames = []
-        alpha_frames = []
+        # Initialize video writers
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        matted_writer = cv2.VideoWriter(matted_path, fourcc, fps, (width, height))
+        alpha_writer = cv2.VideoWriter(alpha_path, fourcc, fps, (width, height))
         
-        for i, (extracted_frame, binary_frame) in enumerate(tqdm(zip(extracted_frames, binary_frames), 
-                                                                  desc="Matting frames", 
-                                                                  total=len(extracted_frames))):
+        # Process frames one by one
+        for frame_idx in range(total_frames):
+            # Read one frame at a time
+            ret1, extracted_frame = cap_extracted.read()
+            ret2, binary_frame = cap_binary.read()
+            
+            if not ret1 or not ret2:
+                break
+            
             # Generate trimap from binary mask
             trimap = self.generate_trimap(binary_frame)
             
-            # Solve for alpha channel using closed-form matting
+            # Solve for alpha channel
             alpha = self.solve_alpha_matting(extracted_frame, trimap)
             
             # Composite with new background
             matted_frame = self.composite_with_background(extracted_frame, alpha, background)
             
-            matted_frames.append(matted_frame)
-            alpha_frames.append(alpha)
+            # Write frames immediately
+            matted_writer.write(matted_frame)
+            alpha_3ch = cv2.cvtColor(alpha, cv2.COLOR_GRAY2BGR)
+            alpha_writer.write(alpha_3ch)
+            
+            # Clear variables immediately
+            del trimap, alpha, matted_frame, alpha_3ch, extracted_frame, binary_frame
+            
+            # Progress update
+            if frame_idx % 10 == 0:
+                print(f"Processed {frame_idx+1}/{total_frames} frames")
+            
+            # Force garbage collection every 20 frames
+            if frame_idx % 20 == 0:
+                import gc
+                gc.collect()
         
-        # Save results
-        print("Saving matted video...")
-        self.write_video(matted_frames, matted_path, metadata['fps'])
-        
-        print("Saving alpha channel video...")
-        self.write_video(alpha_frames, alpha_path, metadata['fps'])
+        # Cleanup
+        cap_extracted.release()
+        cap_binary.release()
+        matted_writer.release()
+        alpha_writer.release()
         
         total_time = time.time() - start_time
         print(f"=== Image Matting Complete! Total time: {total_time:.2f}s ===")
