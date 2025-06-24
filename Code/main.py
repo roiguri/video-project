@@ -10,10 +10,10 @@ from tracking import PersonTracker
 # =============================================================================
 # CONFIGURATION - Change these to YES/NO to control which stages run
 # =============================================================================
-RUN_STABILIZATION = "YES"     # Phase 1: Video Stabilization
+RUN_STABILIZATION = "NO"     # Phase 1: Video Stabilization
 RUN_BACKGROUND_SUB = "NO"    # Phase 2: Background Subtraction  
 RUN_MATTING = "NO"          # Phase 3: Image Matting
-RUN_TRACKING = "NO"          # Phase 4: Person Tracking
+RUN_TRACKING = "YES"          # Phase 4: Person Tracking
 # =============================================================================
 
 def main():
