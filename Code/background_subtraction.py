@@ -127,13 +127,18 @@ class BackgroundSubtractor(VideoProcessor):
             refined_mask = np.zeros_like(current_mask)
             pixel_positions = np.where(current_mask == 1)
             
-            # Check probability of each pixel in the mask
-            fg_probabilities = np.fromiter(
-                map(lambda color_tuple: self.check_probability(fg_prob_cache, color_tuple, fg_probability_model),
-                    map(tuple, current_frame[pixel_positions])), dtype=float)
-            bg_probabilities = np.fromiter(
-                map(lambda color_tuple: self.check_probability(bg_prob_cache, color_tuple, bg_probability_model),
-                    map(tuple, current_frame[pixel_positions])), dtype=float)
+            # Extract pixel colors once to avoid redundant calls
+            pixel_colors = current_frame[pixel_positions]
+            
+            # Check probability of each pixel in the mask using list comprehension
+            fg_probabilities = np.array([
+                self.check_probability(fg_prob_cache, tuple(color), fg_probability_model) 
+                for color in pixel_colors
+            ])
+            bg_probabilities = np.array([
+                self.check_probability(bg_prob_cache, tuple(color), bg_probability_model) 
+                for color in pixel_colors
+            ])
             refined_mask[pixel_positions] = (fg_probabilities > bg_probabilities).astype(np.uint8)
             
             # Apply morphological operations like reference
