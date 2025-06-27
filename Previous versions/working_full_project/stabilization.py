@@ -27,35 +27,9 @@ class VideoStabilizer(VideoProcessor):
     def __init__(self):
         super().__init__()
     
-    def moving_average_1d(self, x, radius):
-        kernel = np.ones(2 * radius + 1) / (2 * radius + 1)
-        return np.convolve(x, kernel, mode="same")
-
-    def smooth_homographies(self, homographies, radius=50):
-        """Element-wise moving average of a list of 3×3 homography matrices."""
-        smoothed = []
-        for i in range(9):  # flatten index
-            series = np.array([H.flatten()[i] for H in homographies])
-            smoothed.append(self.moving_average_1d(series, radius))
-        smoothed = np.stack(smoothed, axis=1).reshape((-1, 3, 3))
-        return smoothed
-
-    def stabilize_video(self, inp, out, smoothing_radius=SMOOTHING_RADIUS):
-        # Check if input file exists
-        if not os.path.exists(inp):
-            raise FileNotFoundError(f"Input video file not found: {inp}")
-        
-        cap = cv2.VideoCapture(inp)
-        
-        # Check if video opened successfully
-        if not cap.isOpened():
-            raise ValueError(f"Could not open video file: {inp}")
-        
-        # TODO: extract these to a util method
-        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
+    def apply_stabilization(self, inp, out, smoothing_radius=SMOOTHING_RADIUS):
+        # Open video and get properties using utils
+        cap, n, w, h, fps = self.open_video_capture(inp)
 
         _, prev = cap.read()
         if prev is None:
@@ -113,3 +87,17 @@ class VideoStabilizer(VideoProcessor):
 
         cap.release()
         vw.release()
+    
+    def moving_average_1d(self, x, radius):
+        """Helper method for 1D moving average"""
+        kernel = np.ones(2 * radius + 1) / (2 * radius + 1)
+        return np.convolve(x, kernel, mode="same")
+
+    def smooth_homographies(self, homographies, radius=50):
+        """Element-wise moving average of a list of 3×3 homography matrices."""
+        smoothed = []
+        for i in range(9):  # flatten index
+            series = np.array([H.flatten()[i] for H in homographies])
+            smoothed.append(self.moving_average_1d(series, radius))
+        smoothed = np.stack(smoothed, axis=1).reshape((-1, 3, 3))
+        return smoothed

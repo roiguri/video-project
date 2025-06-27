@@ -73,26 +73,23 @@ class VideoProcessor:
         with open(timing_path, 'w') as f:
             json.dump(self.timing_data, f, indent=2)
         print(f"Timing data saved to {timing_path}")
-
-def validate_paths():
-    """Validate that required input files exist"""
-    required_files = [
-        'Inputs/INPUT.avi',
-        'Inputs/background.jpg'
-    ]
     
-    for file_path in required_files:
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Required file not found: {file_path}")
-    
-    # Create output directory if it doesn't exist
-    os.makedirs('Outputs', exist_ok=True)
-    print("Path validation completed successfully")
+    def open_video_capture(self, video_path: str) -> Tuple[cv2.VideoCapture, int, int, int, float]:
+        """Open video capture and return capture object and properties for unpacking"""
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video file: {video_path}")
+        
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        
+        print(f"Opened video: {frame_count} frames, {width}x{height}, {fps} FPS")
+        
+        return cap, frame_count, width, height, fps
 
-def get_student_ids() -> Tuple[str, str]:
-    """Get student IDs for file naming"""
-    # TODO: Replace with actual student IDs
-    ID1 = "123456789"  # Replace with first student ID
-    ID2 = "987654321"  # Replace with second student ID
-    ID3 = "123456789"  # Replace with third student ID
-    return ID1, ID2, ID3
+
