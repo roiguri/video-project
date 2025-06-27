@@ -172,19 +172,19 @@ class VideoMatter(VideoProcessor):
         center_col = int(np.mean(fg_col_indices))
         
         # Extract region of interest around center
-        roi_image = downsampled_image[max(center_row - scaled_vertical, 0): min(center_row + scaled_vertical, downsampled_fg.shape[0]),
+        window_image = downsampled_image[max(center_row - scaled_vertical, 0): min(center_row + scaled_vertical, downsampled_fg.shape[0]),
                      max(center_col - scaled_horizontal, 0): min(center_col + scaled_horizontal, downsampled_fg.shape[1])]
-        roi_fg_region = downsampled_fg[max(center_row - scaled_vertical, 0):min(center_row + scaled_vertical, downsampled_fg.shape[0]),
+        window_fg_region = downsampled_fg[max(center_row - scaled_vertical, 0):min(center_row + scaled_vertical, downsampled_fg.shape[0]),
                        max(center_col - scaled_horizontal, 0):min(center_col + scaled_horizontal, downsampled_fg.shape[1])]
-        roi_bg_region = downsampled_bg[max(center_row - scaled_vertical, 0):min(center_row + scaled_vertical, downsampled_fg.shape[0]),
+        window_bg_region = downsampled_bg[max(center_row - scaled_vertical, 0):min(center_row + scaled_vertical, downsampled_fg.shape[0]),
                        max(center_col - scaled_horizontal, 0):min(center_col + scaled_horizontal, downsampled_fg.shape[1])]
         
         # Generate evaluation grid for KDE
         intensity_range = np.linspace(0, 255, 256)
-        hue_channel, saturation_channel, value_channel = cv2.split(roi_image)
+        hue_channel, saturation_channel, value_channel = cv2.split(window_image)
         
         # Calculate foreground density
-        fg_pixel_rows, fg_pixel_cols = np.where(roi_fg_region == 255)
+        fg_pixel_rows, fg_pixel_cols = np.where(window_fg_region == 255)
         if len(fg_pixel_rows) > 0:
             fg_saturation_data = saturation_channel[fg_pixel_rows, fg_pixel_cols]
             try:
@@ -195,7 +195,7 @@ class VideoMatter(VideoProcessor):
             fg_density = np.ones(256)
             
         # Calculate background density
-        bg_pixel_rows, bg_pixel_cols = np.where(roi_bg_region == 255)
+        bg_pixel_rows, bg_pixel_cols = np.where(window_bg_region == 255)
         if len(bg_pixel_rows) > 0:
             bg_saturation_data = saturation_channel[bg_pixel_rows, bg_pixel_cols]
             try:
