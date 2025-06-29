@@ -43,6 +43,7 @@ class VideoMatter(VideoProcessor):
             mask_frame = binary_frames[current_frame_index]
             
             mask_grayscale = cv2.cvtColor(mask_frame, cv2.COLOR_BGR2GRAY)
+            image_shape = mask_grayscale.shape
             
             # Initialize processing masks
             foreground_region = np.zeros_like(mask_grayscale)
@@ -55,7 +56,7 @@ class VideoMatter(VideoProcessor):
             background_region[mask_grayscale <= 10] = 255
             
             # Phase 1: Initial probability and distance computation
-            bg_gradient, fg_gradient, fg_prob, bg_prob = self.compute_region_probabilities(
+            fg_prob, bg_prob = self.compute_region_probabilities(
                 source_frame, background_region, foreground_region, 
                 self.crop_vertical_radius, self.crop_horizontal_radius)
             
@@ -63,13 +64,13 @@ class VideoMatter(VideoProcessor):
             bg_seed_locations = np.where(background_region == 255)
             
             if len(fg_seed_locations[0]) > 0 and len(bg_seed_locations[0]) > 0:
-                fg_distance_map = self.calculate_geodesic_distance(fg_gradient, fg_seed_locations)
-                bg_distance_map = self.calculate_geodesic_distance(bg_gradient, bg_seed_locations)
+                fg_distance_map = self.calculate_geodesic_distance(fg_seed_locations, image_shape)
+                bg_distance_map = self.calculate_geodesic_distance(bg_seed_locations, image_shape)
                 
                 # Generate trimap from distance differences
                 trimap_output[(fg_distance_map - bg_distance_map) > self.separation_threshold] = 0
                 trimap_output[(bg_distance_map - fg_distance_map) > self.separation_threshold] = 255
-                trimap_output[abs(bg_distance_map - fg_distance_map) <= self.separation_threshold] = 0.5 * 256
+                trimap_output[abs(bg_distance_map - fg_distance_map) <= self.separation_threshold] = 128
                 
                 # Update region masks using trimap
                 background_region = np.zeros_like(mask_grayscale)
@@ -79,7 +80,7 @@ class VideoMatter(VideoProcessor):
                 background_region[trimap_output == 0] = 255
                 
                 # Phase 2: Refined probability and distance computation
-                bg_gradient, fg_gradient, fg_prob, bg_prob = self.compute_region_probabilities(
+                fg_prob, bg_prob = self.compute_region_probabilities(
                     source_frame, background_region, foreground_region,
                     self.crop_vertical_radius, self.crop_horizontal_radius)
                 
@@ -87,8 +88,8 @@ class VideoMatter(VideoProcessor):
                 updated_bg_seeds = np.where(background_region == 255)
                 
                 if len(updated_fg_seeds[0]) > 0 and len(updated_bg_seeds[0]) > 0:
-                    fg_distance_map = self.calculate_geodesic_distance(fg_gradient, updated_fg_seeds)
-                    bg_distance_map = self.calculate_geodesic_distance(bg_gradient, updated_bg_seeds)
+                    fg_distance_map = self.calculate_geodesic_distance(updated_fg_seeds, image_shape)
+                    bg_distance_map = self.calculate_geodesic_distance(updated_bg_seeds, image_shape)
                     
                     # Final trimap refinement
                     trimap_output[(fg_distance_map - bg_distance_map) >= self.separation_threshold] = 0
@@ -133,7 +134,7 @@ class VideoMatter(VideoProcessor):
         self.write_video(matted_frames, matted_path, extracted_metadata['fps'])
     
     def compute_region_probabilities(self, input_frame, bg_region, fg_region, vertical_radius, horizontal_radius):
-        """Calculate probability maps from reference implementation"""
+        """Calculate probability maps (no gradients)"""
         frame_hsv = cv2.cvtColor(input_frame, cv2.COLOR_BGR2HSV)
         fg_density_function, bg_density_function = self.estimate_color_densities(
             frame_hsv, fg_region, bg_region, vertical_radius, horizontal_radius)
@@ -149,10 +150,7 @@ class VideoMatter(VideoProcessor):
         fg_probability = fg_likelihood / (fg_likelihood + bg_likelihood + numerical_epsilon)
         bg_probability = 1 - fg_probability
         
-        bg_gradient = cv2.Sobel(bg_probability, cv2.CV_64F, 1, 1, ksize=5)
-        fg_gradient = cv2.Sobel(fg_probability, cv2.CV_64F, 1, 1, ksize=5)
-        
-        return bg_gradient, fg_gradient, fg_probability, bg_probability
+        return fg_probability, bg_probability
     
     def estimate_color_densities(self, hsv_image, fg_region, bg_region, vertical_radius, horizontal_radius):
         """Estimate probability density functions from reference"""
@@ -207,85 +205,17 @@ class VideoMatter(VideoProcessor):
             
         return fg_density, bg_density
     
-    def calculate_geodesic_distance(self, gradient_image, seed_locations):
-        """Calculate geodesic distance from reference implementation"""
+    def calculate_geodesic_distance(self, seed_locations, image_shape):
+        """Calculate Euclidean distance from seed locations"""
         if len(seed_locations) == 0 or len(seed_locations[0]) == 0:
-            return np.ones(gradient_image.shape) * np.inf
+            return np.ones(image_shape) * np.inf
             
         seed_row, seed_col = seed_locations[0], seed_locations[1]
-        invalid_regions = self.detect_missing_mask(gradient_image)
         
-        # Use Euclidean distance transform if no invalid regions
-        if invalid_regions.sum() == 0:
-            distance_array = np.ones(gradient_image.shape)
-            distance_array[seed_row, seed_col] = 0
-            return distance_transform_edt(distance_array)
-        
-        valid_pixel_count = (1 - invalid_regions).sum()
-        distance_map = np.ones(gradient_image.shape) * np.inf
-        distance_map[seed_row, seed_col] = 0
-        
-        def shift_image_direction(image_array, direction_name):
-            if direction_name == 'n':
-                boundary_row = image_array[0, :].copy()
-                image_array = np.roll(image_array, 1, axis=0)
-                image_array[0, :] = boundary_row
-            elif direction_name == 's':
-                boundary_row = image_array[-1, :].copy()
-                image_array = np.roll(image_array, -1, axis=0)
-                image_array[-1, :] = boundary_row
-            elif direction_name == 'e':
-                boundary_col = image_array[:, 0].copy()
-                image_array = np.roll(image_array, 1, axis=1)
-                image_array[:, 0] = boundary_col
-            elif direction_name == 'w':
-                boundary_col = image_array[:, -1].copy()
-                image_array = np.roll(image_array, -1, axis=1)
-                image_array[:, -1] = boundary_col
-            elif direction_name == 'ne':
-                image_array = shift_image_direction(image_array, 'n')
-                image_array = shift_image_direction(image_array, 'e')
-            elif direction_name == 'nw':
-                image_array = shift_image_direction(image_array, 'n')
-                image_array = shift_image_direction(image_array, 'w')
-            elif direction_name == 'sw':
-                image_array = shift_image_direction(image_array, 's')
-                image_array = shift_image_direction(image_array, 'w')
-            elif direction_name == 'se':
-                image_array = shift_image_direction(image_array, 's')
-                image_array = shift_image_direction(image_array, 'e')
-            return image_array
-        
-        def perform_expansion_iteration(distance_array):
-            diagonal_cost = np.sqrt(2)
-            shifted_results = []
-            movement_directions = ['n', 's', 'e', 'w', 'ne', 'nw', 'sw', 'se']
-            movement_costs = [1, 1, 1, 1, diagonal_cost, diagonal_cost, diagonal_cost, diagonal_cost]
-            
-            for direction, cost in zip(movement_directions, movement_costs):
-                shifted_distance = shift_image_direction(distance_array.copy(), direction) + cost
-                shifted_distance = np.minimum(shifted_distance, distance_array)
-                shifted_results.append(shifted_distance)
-            
-            # Combine results by taking minimum
-            combined_result = shifted_results[0]
-            for result in shifted_results[1:]:
-                combined_result = np.minimum(combined_result, result)
-            return combined_result
-        
-        # Iterative distance propagation
-        previous_distance = distance_map.copy()
-        iteration_limit = 1000
-        for _ in range(iteration_limit):
-            expanded_distance = perform_expansion_iteration(distance_map)
-            distance_map = np.where(invalid_regions, distance_map, expanded_distance)
-            processed_pixels = distance_map.size - len(np.where(distance_map == np.inf)[0])
-            
-            if processed_pixels >= valid_pixel_count or np.allclose(previous_distance, distance_map):
-                break
-            previous_distance = distance_map.copy()
-        
-        return distance_map
+        # Simple Euclidean distance transform
+        distance_array = np.ones(image_shape)
+        distance_array[seed_row, seed_col] = 0
+        return distance_transform_edt(distance_array)
     
     def calculate_kde(self, data_values, evaluation_grid, bandwidth=0.2, **kwargs):
         """Kernel Density Estimation with Scipy"""
@@ -293,16 +223,3 @@ class VideoMatter(VideoProcessor):
             return np.ones_like(evaluation_grid)
         density_estimator = gaussian_kde(data_values, bw_method=bandwidth / (data_values.std(ddof=1) + 1e-10), **kwargs)
         return density_estimator.evaluate(evaluation_grid)
-    
-    def detect_missing_mask(self, data_slab):
-        """Get missing mask from array"""
-        nan_locations = np.where(np.isnan(data_slab), 1, 0)
-        if not hasattr(data_slab, 'mask'):
-            masked_locations = np.zeros(data_slab.shape)
-        else:
-            if data_slab.mask.size == 1 and data_slab.mask == False:
-                masked_locations = np.zeros(data_slab.shape)
-            else:
-                masked_locations = np.where(data_slab.mask, 1, 0)
-        combined_mask = np.where(masked_locations + nan_locations > 0, 1, 0)
-        return combined_mask
