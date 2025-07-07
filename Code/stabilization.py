@@ -5,30 +5,24 @@ import numpy as np
 import cv2
 from tqdm import tqdm
 
-from utils import VideoProcessor
+from utils import VideoUtils
 
-# features tracking parameters
+# Configuration parameters
 FEATURES_COUNT = 1000
 FEATURES_QUALITY = 0.01
 FEATURES_MIN_DISTANCE = 20
-
-# homography parameters
 HOMOGRAPHY_RANSAC_THRESHOLD = 5.0
 HOMOGRAPHY_MIN_FEATURES = 10
-
-# smoothing parameters
-SMOOTHING_RADIUS = 50 
-
-# video processing parameters
+SMOOTHING_RADIUS = 50
 VIDEO_INTERPOLATION_METHOD = cv2.INTER_LINEAR
 VIDEO_BORDER_MODE = cv2.BORDER_REPLICATE
 
-class VideoStabilizer(VideoProcessor):
+class VideoStabilizer(VideoUtils):
     def __init__(self):
         super().__init__()
     
-    def apply_stabilization(self, inp, out, smoothing_radius=SMOOTHING_RADIUS):
-        # Open video and get properties using utils
+    def apply_stabilization(self, inp, out, utils, smoothing_radius=SMOOTHING_RADIUS):
+        """Apply video stabilization"""
         cap, n, w, h, fps = self.open_video_capture(inp)
 
         _, prev = cap.read()
@@ -38,7 +32,7 @@ class VideoStabilizer(VideoProcessor):
         prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
         transforms = []
 
-        # Motion estimation phase
+        # Motion estimation
         for i in tqdm(range(n - 1), desc="Motion estimation", leave=False, ncols=80):
             ok, curr = cap.read()
             if not ok:
@@ -87,16 +81,17 @@ class VideoStabilizer(VideoProcessor):
 
         cap.release()
         vw.release()
+        utils.record_timing('time_to_stabilize')
     
     def moving_average_1d(self, x, radius):
-        """Helper method for 1D moving average"""
+        """1D moving average"""
         kernel = np.ones(2 * radius + 1) / (2 * radius + 1)
         return np.convolve(x, kernel, mode="same")
 
     def smooth_homographies(self, homographies, radius=50):
-        """Element-wise moving average of a list of 3×3 homography matrices."""
+        """Smooth homography matrices using moving average"""
         smoothed = []
-        for i in range(9):  # flatten index
+        for i in range(9):
             series = np.array([H.flatten()[i] for H in homographies])
             smoothed.append(self.moving_average_1d(series, radius))
         smoothed = np.stack(smoothed, axis=1).reshape((-1, 3, 3))

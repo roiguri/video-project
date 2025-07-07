@@ -5,7 +5,7 @@ import json
 import time
 from typing import Tuple, List, Dict, Any
 
-class VideoProcessor:
+class VideoUtils:
     """Base class for video processing operations"""
     
     def __init__(self):
@@ -91,5 +91,3 @@ class VideoProcessor:
         print(f"Opened video: {frame_count} frames, {width}x{height}, {fps} FPS")
         
         return cap, frame_count, width, height, fps
-
-

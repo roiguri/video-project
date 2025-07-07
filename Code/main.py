@@ -1,58 +1,49 @@
 import os
 import sys
 import time
-from utils import VideoProcessor
+from utils import VideoUtils
 from stabilization import VideoStabilizer
 from background_subtraction import BackgroundSubtractor
 from matting import VideoMatter
 from tracking import PersonTracker
 
-# =============================================================================
-# CONFIGURATION - Change these to YES/NO to control which stages run
-# =============================================================================
-RUN_STABILIZATION = "NO"     # Phase 1: Video Stabilization
-RUN_BACKGROUND_SUB = "NO"    # Phase 2: Background Subtraction  
-RUN_MATTING = "NO"          # Phase 3: Image Matting
-RUN_TRACKING = "YES"          # Phase 4: Person Tracking
-# =============================================================================
+# Configuration - Change these to YES/NO to control which stages run
+RUN_STABILIZATION = "NO"
+RUN_BACKGROUND_SUB = "NO"
+RUN_MATTING = "YES"
+RUN_TRACKING = "NO"
 
 def main():
-    """Main execution function"""
     print("=== Video Processing Project Started ===")
     start_time = time.time()
     
     try:
         # Student IDs for output file naming
         ID1, ID2, ID3 = "123456789", "987654321", "111222333"
-        
-        # Create output directory if it doesn't exist
         os.makedirs('Outputs', exist_ok=True)
         
-        # Initialize processor
-        processor = VideoProcessor()
-        
-        # Define file paths
+        utils = VideoUtils()
         input_video = 'Inputs/INPUT.avi'
         background_img = 'Inputs/background.jpg'
         
         output_files = {
-            'stabilized': f'Outputs/stabilized_{ID1}_{ID2}_{ID3}.avi',
+            'stabilize': f'Outputs/stabilize_{ID1}_{ID2}_{ID3}.avi',
             'extracted': f'Outputs/extracted_{ID1}_{ID2}_{ID3}.avi',
             'binary': f'Outputs/binary_{ID1}_{ID2}_{ID3}.avi',
             'alpha': f'Outputs/alpha_{ID1}_{ID2}_{ID3}.avi',
             'matted': f'Outputs/matted_{ID1}_{ID2}_{ID3}.avi',
             'output': f'Outputs/OUTPUT_{ID1}_{ID2}_{ID3}.avi'
         }
-                
+        
         # Phase 1: Video Stabilization
         if RUN_STABILIZATION == "YES":
             print("\n--- Phase 1: Video Stabilization ---")
             stabilizer = VideoStabilizer()
             stabilizer.apply_stabilization(
                 input_video,
-                output_files['stabilized']
+                output_files['stabilize'],
+                utils
             )
-            processor.record_timing('stabilized')
         else:
             print("\n--- Phase 1: Video Stabilization (SKIPPED) ---")
         
@@ -61,13 +52,10 @@ def main():
             print("\n--- Phase 2: Background Subtraction ---")
             bg_subtractor = BackgroundSubtractor()
             bg_subtractor.apply_subtraction(
-                output_files['stabilized'],  # Use existing stabilized video
-                background_img,
-                output_files['extracted'],
-                output_files['binary']
+                output_files['stabilize'], background_img,
+                output_files['extracted'], output_files['binary'],
+                utils
             )
-            processor.record_timing('extracted')
-            processor.record_timing('binary')
         else:
             print("\n--- Phase 2: Background Subtraction (SKIPPED) ---")
         
@@ -76,14 +64,10 @@ def main():
             print("\n--- Phase 3: Image Matting ---")
             matter = VideoMatter()
             matter.apply_matting(
-                output_files['extracted'],   # Use existing extracted video
-                output_files['binary'],      # Use existing binary mask
-                background_img,              # Background image
-                output_files['matted'],      # Generate matted video
-                output_files['alpha']        # Generate alpha channel
+                output_files['extracted'], output_files['binary'], background_img,
+                output_files['matted'], output_files['alpha'],
+                utils
             )
-            processor.record_timing('matted')
-            processor.record_timing('alpha')
         else:
             print("\n--- Phase 3: Image Matting (SKIPPED) ---")
         
@@ -92,17 +76,14 @@ def main():
             print("\n--- Phase 4: Person Tracking ---")
             tracker = PersonTracker()
             tracking_results = tracker.apply_tracking(
-                output_files['matted'],  # Use matted video as specified
-                output_files['output']
+                output_files['matted'], output_files['binary'], output_files['output'],
+                utils
             )
             tracker.save_tracking_json('Outputs', tracking_results)
-            processor.record_timing('OUTPUT')
         else:
             print("\n--- Phase 4: Person Tracking (SKIPPED) ---")
         
-        # Save timing results
-        processor.save_timing_json('Outputs')
-        
+        utils.save_timing_json('Outputs')
         total_time = time.time() - start_time
         print(f"\n=== Processing Complete! Total time: {total_time:.2f}s ===")
         
