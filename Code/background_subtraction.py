@@ -14,165 +14,165 @@ class BackgroundSubtractor(VideoUtils):
     def __init__(self):
         super().__init__()
     
-    def apply_subtraction(self, input_video_path, background_img_path, extracted_output_path, binary_output_path, utils):
+    def apply_subtraction(self, video_path, bg_img_path, extracted_path, binary_path, utils):
         """Main background subtraction function"""
         
         np.random.seed(0)
         
         # Read video frames
-        video_frames, metadata = self.read_video(input_video_path)
+        frames, metadata = self.read_video(video_path)
         
-        if not video_frames:
-            raise ValueError(f"No frames found in {input_video_path}")
+        if not frames:
+            raise ValueError(f"No frames found in {video_path}")
         
         # Stage 1: Create initial masks
-        preliminary_masks = self.stage1(video_frames)
+        initial_masks = self.stage1(frames)
         
         # Stage 2: Improve masks
-        refined_masks, bg_samples, fg_samples = self.stage2(video_frames, preliminary_masks)
+        improved_masks, bg_samples, fg_samples = self.stage2(frames, initial_masks)
         
         # Stage 3: Generate final frames
-        extracted_sequence, binary_sequence = self.stage3(
-            video_frames, refined_masks, bg_samples, fg_samples)
+        extracted_frames, binary_frames = self.stage3(
+            frames, improved_masks, bg_samples, fg_samples)
         
         # Save output videos
-        self.write_video(extracted_sequence, extracted_output_path, metadata['fps'])
-        self.write_video(binary_sequence, binary_output_path, metadata['fps'])
+        self.write_video(extracted_frames, extracted_path, metadata['fps'])
+        self.write_video(binary_frames, binary_path, metadata['fps'])
         utils.record_timing('time_to_binary')
         
-        return binary_sequence, extracted_sequence
+        return binary_frames, extracted_frames
     
-    def stage1(self, video_frames):
-        knn_model = cv2.createBackgroundSubtractorKNN()
-        mask_sequence = []
+    def stage1(self, frames):
+        knn = cv2.createBackgroundSubtractorKNN()
+        masks = []
         
-        for iteration_num in range(ITERATION_LIMIT):
-            current_iteration_masks = []
+        for iter_num in range(ITERATION_LIMIT):
+            iter_masks = []
             
-            for current_frame in tqdm(video_frames, desc=f"KNN iteration {iteration_num + 1}/{ITERATION_LIMIT}", leave=False, ncols=80):
+            for frame in tqdm(frames, desc=f"KNN iteration {iter_num + 1}/{ITERATION_LIMIT}", leave=False, ncols=80):
                 # Convert to HSV and use S and V channels
-                hsv_converted = cv2.cvtColor(current_frame, cv2.COLOR_BGR2HSV)
-                sv_channels = hsv_converted[:, :, 1:]
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                sv = hsv[:, :, 1:]
                 
                 # Apply background subtractor
-                foreground_mask = knn_model.apply(sv_channels)
-                foreground_mask = (foreground_mask > 130).astype(np.uint8)
-                current_iteration_masks.append(foreground_mask)
+                fg_mask = knn.apply(sv)
+                fg_mask = (fg_mask > 130).astype(np.uint8)
+                iter_masks.append(fg_mask)
             
-            mask_sequence = current_iteration_masks
+            masks = iter_masks
         
-        return mask_sequence
+        return masks
     
-    def stage2(self, video_frames, mask_sequence):
+    def stage2(self, frames, masks):
         """Improve masks using morphological operations"""
-        total_frames = len(video_frames)
-        bg_samples = np.empty((BG_SAMPLE_COUNT * total_frames, 3))
-        fg_samples = np.empty((FG_SAMPLE_COUNT * total_frames, 3))
+        num_frames = len(frames)
+        bg_samples = np.empty((BG_SAMPLE_COUNT * num_frames, 3))
+        fg_samples = np.empty((FG_SAMPLE_COUNT * num_frames, 3))
         
-        fg_index = 0
-        bg_index = 0
-        refined_masks = []
+        fg_idx = 0
+        bg_idx = 0
+        improved_masks = []
         
-        for frame_idx, current_frame in enumerate(tqdm(video_frames, desc="Improving masks", leave=False, ncols=80)):
-            current_mask = mask_sequence[frame_idx]
+        for i, frame in enumerate(tqdm(frames, desc="Improving masks", leave=False, ncols=80)):
+            mask = masks[i]
             
             # Morphological operations
-            morph_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (6, 6))
-            current_mask = cv2.morphologyEx(current_mask, cv2.MORPH_CLOSE, morph_kernel)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (6, 6))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
             
             # Find contours and get largest
-            detected_contours, _ = cv2.findContours(current_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            if detected_contours:
-                sorted_contours = sorted(detected_contours, key=cv2.contourArea, reverse=True)
-                object_mask = np.zeros(current_mask.shape, dtype=np.uint8)
-                cv2.fillPoly(object_mask, pts=[sorted_contours[0]], color=1)
+            contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                largest_contour = max(contours, key=cv2.contourArea)
+                clean_mask = np.zeros(mask.shape, dtype=np.uint8)
+                cv2.fillPoly(clean_mask, pts=[largest_contour], color=1)
             else:
-                object_mask = np.zeros(current_mask.shape, dtype=np.uint8)
+                clean_mask = np.zeros(mask.shape, dtype=np.uint8)
             
-            refined_masks.append(object_mask)
+            improved_masks.append(clean_mask)
             
             # Collect samples
-            fg_locations, actual_fg_count = self.sample_pixel_locations(object_mask, 1, FG_SAMPLE_COUNT)
-            bg_locations, actual_bg_count = self.sample_pixel_locations(object_mask, 0, BG_SAMPLE_COUNT)
+            fg_locations, fg_count = self.sample_pixel_locations(clean_mask, 1, FG_SAMPLE_COUNT)
+            bg_locations, bg_count = self.sample_pixel_locations(clean_mask, 0, BG_SAMPLE_COUNT)
             
-            if actual_fg_count > 0:
-                fg_samples[fg_index:fg_index + actual_fg_count] = current_frame[fg_locations[:, 0], fg_locations[:, 1], :]
-                fg_index += actual_fg_count
+            if fg_count > 0:
+                fg_samples[fg_idx:fg_idx + fg_count] = frame[fg_locations[:, 0], fg_locations[:, 1], :]
+                fg_idx += fg_count
             
-            if actual_bg_count > 0:
-                bg_samples[bg_index:bg_index + actual_bg_count] = current_frame[bg_locations[:, 0], bg_locations[:, 1], :]
-                bg_index += actual_bg_count
+            if bg_count > 0:
+                bg_samples[bg_idx:bg_idx + bg_count] = frame[bg_locations[:, 0], bg_locations[:, 1], :]
+                bg_idx += bg_count
         
-        bg_samples = bg_samples[:bg_index]
-        fg_samples = fg_samples[:fg_index]
+        bg_samples = bg_samples[:bg_idx]
+        fg_samples = fg_samples[:fg_idx]
         
-        return refined_masks, bg_samples, fg_samples
+        return improved_masks, bg_samples, fg_samples
     
-    def stage3(self, video_frames, mask_sequence, bg_samples, fg_samples):
+    def stage3(self, frames, masks, bg_samples, fg_samples):
         """Generate final frames using KDE"""
-        fg_probability_model = gaussian_kde(np.asarray(fg_samples).T, bw_method=KDE_BANDWIDTH)
-        bg_probability_model = gaussian_kde(np.asarray(bg_samples).T, bw_method=KDE_BANDWIDTH)
+        fg_kde = gaussian_kde(np.asarray(fg_samples).T, bw_method=KDE_BANDWIDTH)
+        bg_kde = gaussian_kde(np.asarray(bg_samples).T, bw_method=KDE_BANDWIDTH)
         
         # Memoization dictionaries
-        fg_prob_cache = dict()
-        bg_prob_cache = dict()
+        fg_cache = dict()
+        bg_cache = dict()
         
-        binary_sequence = []
-        extracted_sequence = []
+        binary_results = []
+        extracted_results = []
         
-        for frame_idx, current_frame in enumerate(tqdm(video_frames, desc="Generating frames with KDE", leave=False, ncols=80)):
-            current_mask = mask_sequence[frame_idx].copy()
-            refined_mask = np.zeros_like(current_mask)
-            pixel_positions = np.where(current_mask == 1)
+        for i, frame in enumerate(tqdm(frames, desc="Generating frames with KDE", leave=False, ncols=80)):
+            mask = masks[i].copy()
+            final_mask = np.zeros_like(mask)
+            pixel_positions = np.where(mask == 1)
             
             # Extract pixel colors
-            pixel_colors = current_frame[pixel_positions]
+            colors = frame[pixel_positions]
             
             # Check probability of each pixel
             fg_probabilities = np.array([
-                self.check_probability(fg_prob_cache, tuple(color), fg_probability_model)
-                for color in pixel_colors
+                self.check_probability(fg_cache, tuple(color), fg_kde)
+                for color in colors
             ])
             bg_probabilities = np.array([
-                self.check_probability(bg_prob_cache, tuple(color), bg_probability_model)
-                for color in pixel_colors
+                self.check_probability(bg_cache, tuple(color), bg_kde)
+                for color in colors
             ])
-            refined_mask[pixel_positions] = (fg_probabilities > bg_probabilities).astype(np.uint8)
+            final_mask[pixel_positions] = (fg_probabilities > bg_probabilities).astype(np.uint8)
             
-            erosion_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            refined_mask = cv2.erode(refined_mask, erosion_kernel).astype(np.uint8)
+            erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            final_mask = cv2.erode(final_mask, erode_kernel).astype(np.uint8)
             
-            final_contours, _ = cv2.findContours(refined_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            if final_contours:
-                largest_contours = sorted(final_contours, key=cv2.contourArea, reverse=True)
-                object_mask = np.zeros((refined_mask.shape), dtype=np.uint8)
-                cv2.fillPoly(object_mask, pts=[largest_contours[0]], color=1)
-                object_mask = cv2.morphologyEx(object_mask, cv2.MORPH_CLOSE, np.ones((15, 15))).astype(np.uint8)
+            contours, _ = cv2.findContours(final_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                largest_contour = max(contours, key=cv2.contourArea)
+                result_mask = np.zeros((final_mask.shape), dtype=np.uint8)
+                cv2.fillPoly(result_mask, pts=[largest_contour], color=1)
+                result_mask = cv2.morphologyEx(result_mask, cv2.MORPH_CLOSE, np.ones((15, 15))).astype(np.uint8)
             else:
-                object_mask = refined_mask
+                result_mask = final_mask
             
-            object_mask[object_mask == 1] = 255
-            binary_sequence.append(object_mask)
-            extracted_sequence.append(cv2.bitwise_and(current_frame, current_frame, mask=object_mask))
+            result_mask[result_mask == 1] = 255
+            binary_results.append(result_mask)
+            extracted_results.append(cv2.bitwise_and(frame, frame, mask=result_mask))
         
-        return extracted_sequence, binary_sequence
+        return extracted_results, binary_results
     
-    def sample_pixel_locations(self, source_mask, target_value, desired_count):
+    def sample_pixel_locations(self, mask, target_value, count):
         """Sample pixel locations from mask"""
-        found_indices = np.where(source_mask == target_value)
-        if len(found_indices[0]) < desired_count:
-            print(f"Not enough points in source_mask, using {len(found_indices[0])} points instead of {desired_count}")
-            desired_count = len(found_indices[0])
-        if desired_count > 0:
-            random_selection = np.random.choice(len(found_indices[0]), desired_count)
-            return np.column_stack((found_indices[0][random_selection], found_indices[1][random_selection])), desired_count
+        found_indices = np.where(mask == target_value)
+        if len(found_indices[0]) < count:
+            print(f"Not enough points in mask, using {len(found_indices[0])} points instead of {count}")
+            count = len(found_indices[0])
+        if count > 0:
+            selection = np.random.choice(len(found_indices[0]), count)
+            return np.column_stack((found_indices[0][selection], found_indices[1][selection])), count
         else:
             return np.array([]).reshape(0, 2), 0
     
-    def check_probability(self, probability_cache, color_value, probability_function):
+    def check_probability(self, cache, color, kde_func):
         """Check probability with caching"""
-        if color_value in probability_cache:
-            return probability_cache[color_value]
+        if color in cache:
+            return cache[color]
         else:
-            probability_cache[color_value] = probability_function(color_value)[0]
-            return probability_cache[color_value]
+            cache[color] = kde_func(color)[0]
+            return cache[color]

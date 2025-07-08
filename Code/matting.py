@@ -24,180 +24,180 @@ class VideoMatter(VideoUtils):
         """Apply matting to video"""
         
         # Read input videos
-        extracted_frames, extracted_metadata = self.read_video(extracted_path)
-        binary_frames, _ = self.read_video(binary_path)
-        new_background = cv2.imread(background_path)
+        frames, metadata = self.read_video(extracted_path)
+        masks, _ = self.read_video(binary_path)
+        bg_image = cv2.imread(background_path)
         
-        if not extracted_frames or not binary_frames:
+        if not frames or not masks:
             raise ValueError("Could not read input videos")
         
-        if len(extracted_frames) != len(binary_frames):
+        if len(frames) != len(masks):
             raise ValueError("Extracted and binary videos have different frame counts")
         
         
-        alpha_frames = []
-        matted_frames = []
+        alpha_results = []
+        matted_results = []
         
-        for current_frame_index in tqdm(range(len(extracted_frames)), desc="Video matting", leave=False, ncols=80):
-            source_frame = extracted_frames[current_frame_index]
-            mask_frame = binary_frames[current_frame_index]
+        for i in tqdm(range(len(frames)), desc="Video matting", leave=False, ncols=80):
+            frame = frames[i]
+            mask = masks[i]
             
-            mask_grayscale = cv2.cvtColor(mask_frame, cv2.COLOR_BGR2GRAY)
-            image_shape = mask_grayscale.shape
+            gray_mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            h, w = gray_mask.shape
             
             # Initialize processing masks
-            foreground_region = np.zeros_like(mask_grayscale)
-            background_region = np.zeros_like(mask_grayscale)
-            trimap_output = np.zeros_like(mask_grayscale)
-            alpha_channel = np.zeros_like(mask_grayscale)
+            foreground_region = np.zeros_like(gray_mask)
+            background_region = np.zeros_like(gray_mask)
+            trimap = np.zeros_like(gray_mask)
+            alpha = np.zeros_like(gray_mask)
             
             # Create initial region masks
-            foreground_region[mask_grayscale >= 240] = 255
-            background_region[mask_grayscale <= 10] = 255
+            foreground_region[gray_mask >= 240] = 255
+            background_region[gray_mask <= 10] = 255
             
             # Phase 1: Initial computation
             fg_prob, bg_prob = self.compute_region_probabilities(
-                source_frame, background_region, foreground_region,
+                frame, background_region, foreground_region,
                 CROP_VERTICAL_RADIUS, CROP_HORIZONTAL_RADIUS)
             
             fg_seed_locations = np.where(foreground_region == 255)
             bg_seed_locations = np.where(background_region == 255)
             
             if len(fg_seed_locations[0]) > 0 and len(bg_seed_locations[0]) > 0:
-                fg_distance_map = self.calculate_geodesic_distance(fg_seed_locations, image_shape)
-                bg_distance_map = self.calculate_geodesic_distance(bg_seed_locations, image_shape)
+                fg_distance_map = self.calculate_geodesic_distance(fg_seed_locations, (h, w))
+                bg_distance_map = self.calculate_geodesic_distance(bg_seed_locations, (h, w))
                 
                 # Generate trimap
-                trimap_output[(fg_distance_map - bg_distance_map) > SEPARATION_THRESHOLD] = 0
-                trimap_output[(bg_distance_map - fg_distance_map) > SEPARATION_THRESHOLD] = 255
-                trimap_output[abs(bg_distance_map - fg_distance_map) <= SEPARATION_THRESHOLD] = 128
+                trimap[(fg_distance_map - bg_distance_map) > SEPARATION_THRESHOLD] = 0
+                trimap[(bg_distance_map - fg_distance_map) > SEPARATION_THRESHOLD] = 255
+                trimap[abs(bg_distance_map - fg_distance_map) <= SEPARATION_THRESHOLD] = 128
                 
                 # Update region masks
-                background_region = np.zeros_like(mask_grayscale)
-                foreground_region = np.zeros_like(mask_grayscale)
+                background_region = np.zeros_like(gray_mask)
+                foreground_region = np.zeros_like(gray_mask)
                 
-                foreground_region[trimap_output == 255] = 255
-                background_region[trimap_output == 0] = 255
+                foreground_region[trimap == 255] = 255
+                background_region[trimap == 0] = 255
                 
                 # Phase 2: Refined computation
                 fg_prob, bg_prob = self.compute_region_probabilities(
-                    source_frame, background_region, foreground_region,
+                    frame, background_region, foreground_region,
                     CROP_VERTICAL_RADIUS, CROP_HORIZONTAL_RADIUS)
                 
-                updated_fg_seeds = np.where(foreground_region == 255)
-                updated_bg_seeds = np.where(background_region == 255)
+                new_fg_seed_locations = np.where(foreground_region == 255)
+                new_bg_seed_locations = np.where(background_region == 255)
                 
-                if len(updated_fg_seeds[0]) > 0 and len(updated_bg_seeds[0]) > 0:
-                    fg_distance_map = self.calculate_geodesic_distance(updated_fg_seeds, image_shape)
-                    bg_distance_map = self.calculate_geodesic_distance(updated_bg_seeds, image_shape)
+                if len(new_fg_seed_locations[0]) > 0 and len(new_bg_seed_locations[0]) > 0:
+                    fg_distance_map = self.calculate_geodesic_distance(new_fg_seed_locations, (h, w))
+                    bg_distance_map = self.calculate_geodesic_distance(new_bg_seed_locations, (h, w))
                     
                     # Final trimap
-                    trimap_output[(fg_distance_map - bg_distance_map) >= SEPARATION_THRESHOLD] = 0
-                    trimap_output[(bg_distance_map - fg_distance_map) >= SEPARATION_THRESHOLD] = 255
-                    trimap_output[abs(bg_distance_map - fg_distance_map) < SEPARATION_THRESHOLD] = 0.5 * 256
+                    trimap[(fg_distance_map - bg_distance_map) >= SEPARATION_THRESHOLD] = 0
+                    trimap[(bg_distance_map - fg_distance_map) >= SEPARATION_THRESHOLD] = 255
+                    trimap[abs(bg_distance_map - fg_distance_map) < SEPARATION_THRESHOLD] = 0.5 * 256
                     
                     # Calculate alpha weights
-                    foreground_weights = (fg_distance_map + EPSILON) ** (-DISTANCE_EXPONENT) * fg_prob
-                    background_weights = (bg_distance_map + EPSILON) ** (-DISTANCE_EXPONENT) * bg_prob
+                    fg_weights = (fg_distance_map + EPSILON) ** (-DISTANCE_EXPONENT) * fg_prob
+                    bg_weights = (bg_distance_map + EPSILON) ** (-DISTANCE_EXPONENT) * bg_prob
                     
                     # Generate alpha
-                    alpha_channel = foreground_weights / (foreground_weights + background_weights + EPSILON)
-                    alpha_channel[trimap_output == 255] = 1
-                    alpha_channel[trimap_output == 0] = 0
+                    alpha = fg_weights / (fg_weights + bg_weights + EPSILON)
+                    alpha[trimap == 255] = 1
+                    alpha[trimap == 0] = 0
                 else:
-                    alpha_channel = trimap_output.astype(np.float64) / 255.0
+                    alpha = trimap.astype(np.float64) / 255.0
             else:
-                trimap_output = mask_grayscale
-                alpha_channel = mask_grayscale.astype(np.float64) / 255.0
+                trimap = gray_mask
+                alpha = gray_mask.astype(np.float64) / 255.0
             
             # Composite frame in HSV space
-            composite_frame = np.zeros_like(source_frame)
-            composite_hsv = cv2.cvtColor(composite_frame, cv2.COLOR_BGR2HSV)
-            source_hsv = cv2.cvtColor(source_frame, cv2.COLOR_BGR2HSV)
-            background_hsv = cv2.cvtColor(new_background, cv2.COLOR_BGR2HSV)
+            result = np.zeros_like(frame)
+            result_hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV)
+            frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            bg_hsv = cv2.cvtColor(bg_image, cv2.COLOR_BGR2HSV)
             
-            composite_hsv[:, :, 0] = alpha_channel * source_hsv[:, :, 0] + (1 - alpha_channel) * background_hsv[:, :, 0]
-            composite_hsv[:, :, 1] = alpha_channel * source_hsv[:, :, 1] + (1 - alpha_channel) * background_hsv[:, :, 1]
-            composite_hsv[:, :, 2] = alpha_channel * source_hsv[:, :, 2] + (1 - alpha_channel) * background_hsv[:, :, 2]
+            result_hsv[:, :, 0] = alpha * frame_hsv[:, :, 0] + (1 - alpha) * bg_hsv[:, :, 0]
+            result_hsv[:, :, 1] = alpha * frame_hsv[:, :, 1] + (1 - alpha) * bg_hsv[:, :, 1]
+            result_hsv[:, :, 2] = alpha * frame_hsv[:, :, 2] + (1 - alpha) * bg_hsv[:, :, 2]
             
             # Convert outputs
-            alpha_output = (alpha_channel * 255).astype(np.uint8)
-            alpha_bgr = cv2.cvtColor(alpha_output, cv2.COLOR_GRAY2BGR)
-            composite_bgr = cv2.cvtColor(composite_hsv, cv2.COLOR_HSV2BGR)
+            alpha_img = (alpha * 255).astype(np.uint8)
+            alpha_bgr = cv2.cvtColor(alpha_img, cv2.COLOR_GRAY2BGR)
+            result_bgr = cv2.cvtColor(result_hsv, cv2.COLOR_HSV2BGR)
             
-            alpha_frames.append(np.uint8(alpha_bgr))
-            matted_frames.append(np.uint8(composite_bgr))
+            alpha_results.append(np.uint8(alpha_bgr))
+            matted_results.append(np.uint8(result_bgr))
         
         # Save videos
-        self.write_video(alpha_frames, alpha_path, extracted_metadata['fps'])
+        self.write_video(alpha_results, alpha_path, metadata['fps'])
         utils.record_timing('time_to_alpha')
-        self.write_video(matted_frames, matted_path, extracted_metadata['fps'])
+        self.write_video(matted_results, matted_path, metadata['fps'])
         utils.record_timing('time_to_matted')
     
-    def compute_region_probabilities(self, input_frame, bg_region, fg_region, vertical_radius, horizontal_radius):
+    def compute_region_probabilities(self, frame, background_region, foreground_region, v_radius, h_radius):
         """Calculate probability maps"""
-        frame_hsv = cv2.cvtColor(input_frame, cv2.COLOR_BGR2HSV)
-        fg_density_function, bg_density_function = self.estimate_color_densities(
-            frame_hsv, fg_region, bg_region, vertical_radius, horizontal_radius)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        fg_density, bg_density = self.estimate_color_densities(
+            hsv, foreground_region, background_region, v_radius, h_radius)
         
         # Extract and clip saturation values
-        saturation_values = frame_hsv[:, :, 1]
-        clipped_saturation = np.clip(saturation_values, 0, 255).astype(int)
+        sat = hsv[:, :, 1]
+        sat_clipped = np.clip(sat, 0, 255).astype(int)
         
-        fg_likelihood = fg_density_function[clipped_saturation]
-        bg_likelihood = bg_density_function[clipped_saturation]
+        fg_like = fg_density[sat_clipped]
+        bg_like = bg_density[sat_clipped]
         
-        fg_probability = fg_likelihood / (fg_likelihood + bg_likelihood + EPSILON)
-        bg_probability = 1 - fg_probability
+        fg_prob = fg_like / (fg_like + bg_like + EPSILON)
+        bg_prob = 1 - fg_prob
         
-        return fg_probability, bg_probability
+        return fg_prob, bg_prob
     
-    def estimate_color_densities(self, hsv_image, fg_region, bg_region, vertical_radius, horizontal_radius):
+    def estimate_color_densities(self, hsv, foreground_region, background_region, v_radius, h_radius):
         """Estimate color density functions"""
         # Downsample for efficiency
-        downsampled_image = cv2.resize(hsv_image, (hsv_image.shape[1] // 4, hsv_image.shape[0] // 4))
-        downsampled_fg = cv2.resize(fg_region, (fg_region.shape[1] // 4, fg_region.shape[0] // 4))
-        downsampled_bg = cv2.resize(bg_region, (bg_region.shape[1] // 4, bg_region.shape[0] // 4))
-        scaled_vertical = vertical_radius // 4
-        scaled_horizontal = horizontal_radius // 4
+        small_hsv = cv2.resize(hsv, (hsv.shape[1] // 4, hsv.shape[0] // 4))
+        small_fg = cv2.resize(foreground_region, (foreground_region.shape[1] // 4, foreground_region.shape[0] // 4))
+        small_bg = cv2.resize(background_region, (background_region.shape[1] // 4, background_region.shape[0] // 4))
+        v_small = v_radius // 4
+        h_small = h_radius // 4
         
         # Locate object center
-        fg_row_indices, fg_col_indices = np.where(downsampled_fg == 255)
-        if len(fg_row_indices) == 0:
+        rows, cols = np.where(small_fg == 255)
+        if len(rows) == 0:
             return np.ones(256), np.ones(256)
             
-        center_row = int(np.mean(fg_row_indices))
-        center_col = int(np.mean(fg_col_indices))
+        center_y = int(np.mean(rows))
+        center_x = int(np.mean(cols))
         
         # Extract region of interest
-        window_image = downsampled_image[max(center_row - scaled_vertical, 0): min(center_row + scaled_vertical, downsampled_fg.shape[0]),
-                     max(center_col - scaled_horizontal, 0): min(center_col + scaled_horizontal, downsampled_fg.shape[1])]
-        window_fg_region = downsampled_fg[max(center_row - scaled_vertical, 0):min(center_row + scaled_vertical, downsampled_fg.shape[0]),
-                       max(center_col - scaled_horizontal, 0):min(center_col + scaled_horizontal, downsampled_fg.shape[1])]
-        window_bg_region = downsampled_bg[max(center_row - scaled_vertical, 0):min(center_row + scaled_vertical, downsampled_fg.shape[0]),
-                       max(center_col - scaled_horizontal, 0):min(center_col + scaled_horizontal, downsampled_fg.shape[1])]
+        y1, y2 = max(center_y - v_small, 0), min(center_y + v_small, small_fg.shape[0])
+        x1, x2 = max(center_x - h_small, 0), min(center_x + h_small, small_fg.shape[1])
+        
+        window_hsv = small_hsv[y1:y2, x1:x2]
+        window_fg = small_fg[y1:y2, x1:x2]
+        window_bg = small_bg[y1:y2, x1:x2]
         
         # Generate evaluation grid
-        intensity_range = np.linspace(0, 255, 256)
-        _, saturation_channel, _ = cv2.split(window_image)
+        eval_range = np.linspace(0, 255, 256)
+        _, sat_channel, _ = cv2.split(window_hsv)
         
         # Calculate foreground density
-        fg_pixel_rows, fg_pixel_cols = np.where(window_fg_region == 255)
-        if len(fg_pixel_rows) > 0:
-            fg_saturation_data = saturation_channel[fg_pixel_rows, fg_pixel_cols]
+        fg_y, fg_x = np.where(window_fg == 255)
+        if len(fg_y) > 0:
+            fg_sat_data = sat_channel[fg_y, fg_x]
             try:
-                fg_density = self.calculate_kde(fg_saturation_data, intensity_range)
+                fg_density = self.calculate_kde(fg_sat_data, eval_range)
             except:
                 fg_density = np.ones(256)
         else:
             fg_density = np.ones(256)
             
         # Calculate background density
-        bg_pixel_rows, bg_pixel_cols = np.where(window_bg_region == 255)
-        if len(bg_pixel_rows) > 0:
-            bg_saturation_data = saturation_channel[bg_pixel_rows, bg_pixel_cols]
+        bg_y, bg_x = np.where(window_bg == 255)
+        if len(bg_y) > 0:
+            bg_sat_data = sat_channel[bg_y, bg_x]
             try:
-                bg_density = self.calculate_kde(bg_saturation_data, intensity_range)
+                bg_density = self.calculate_kde(bg_sat_data, eval_range)
             except:
                 bg_density = np.ones(256)
         else:
@@ -205,22 +205,22 @@ class VideoMatter(VideoUtils):
             
         return fg_density, bg_density
     
-    def calculate_geodesic_distance(self, seed_locations, image_shape):
+    def calculate_geodesic_distance(self, seeds, shape):
         """Calculate distance from seed locations"""
-        if len(seed_locations) == 0 or len(seed_locations[0]) == 0:
-            return np.ones(image_shape) * np.inf
+        if len(seeds) == 0 or len(seeds[0]) == 0:
+            return np.ones(shape) * np.inf
             
-        seed_row, seed_col = seed_locations[0], seed_locations[1]
+        seed_y, seed_x = seeds[0], seeds[1]
         
         # Euclidean distance transform
-        distance_array = np.ones(image_shape)
-        distance_array[seed_row, seed_col] = 0
-        return distance_transform_edt(distance_array)
+        dist_map = np.ones(shape)
+        dist_map[seed_y, seed_x] = 0
+        return distance_transform_edt(dist_map)
     
-    def calculate_kde(self, data_values, evaluation_grid, **kwargs):
+    def calculate_kde(self, data, eval_grid, **kwargs):
         """Kernel density estimation"""
-        if len(data_values) == 0:
-            return np.ones_like(evaluation_grid)
+        if len(data) == 0:
+            return np.ones_like(eval_grid)
         # TODO: kwargs?
-        density_estimator = gaussian_kde(data_values, bw_method=KDE_BANDWIDTH / (data_values.std(ddof=1) + 1e-10), **kwargs)
-        return density_estimator.evaluate(evaluation_grid)
+        kde = gaussian_kde(data, bw_method=KDE_BANDWIDTH / (data.std(ddof=1) + 1e-10), **kwargs)
+        return kde.evaluate(eval_grid)
