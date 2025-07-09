@@ -217,10 +217,9 @@ class VideoMatter(VideoUtils):
         dist_map[seed_y, seed_x] = 0
         return distance_transform_edt(dist_map)
     
-    def calculate_kde(self, data, eval_grid, **kwargs):
+    def calculate_kde(self, data, eval_grid):
         """Kernel density estimation"""
         if len(data) == 0:
             return np.ones_like(eval_grid)
-        # TODO: kwargs?
-        kde = gaussian_kde(data, bw_method=KDE_BANDWIDTH / (data.std(ddof=1) + 1e-10), **kwargs)
+        kde = gaussian_kde(data, bw_method=KDE_BANDWIDTH / (data.std(ddof=1) + 1e-10))
         return kde.evaluate(eval_grid)

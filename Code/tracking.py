@@ -36,7 +36,7 @@ class PersonTracker(VideoUtils):
             raise ValueError(f"No frames found in {input_path}")
         
         # Get initial bounding box from binary video (first frame only)
-        initial_detection = self.get_initial_bbox_from_binary(binary_path)
+        initial_detection = self.get_initial_detection_from_binary(binary_path)
         
         # Store initial dimensions for size constraints
         self.initial_half_width = initial_detection[2]
@@ -84,8 +84,13 @@ class PersonTracker(VideoUtils):
                 # Resample particles
                 particles = self.resample_particles(particles, weights)
             
-            # Store tracking result
-            tracking_results[str(frame_idx)] = [int(x) for x in current_detection]
+            # Store tracking result in format [ROW, COL, HEIGHT, WIDTH]
+            x_center, y_center, half_width, half_height = current_detection
+            row = y_center - half_height  # top-left y
+            col = x_center - half_width   # top-left x
+            height = 2 * half_height
+            width = 2 * half_width
+            tracking_results[str(frame_idx)] = [int(row), int(col), int(height), int(width)]
             
             # Draw tracking results
             frame_with_tracking = self.draw_tracking_results(frame, current_detection)
@@ -98,8 +103,8 @@ class PersonTracker(VideoUtils):
         
         return tracking_results
     
-    def get_initial_bbox_from_binary(self, binary_video_path):
-        """Get initial bounding box from first frame of binary video"""
+    def get_initial_detection_from_binary(self, binary_video_path):
+        """Get initial detection from first frame of binary video"""
         cap = cv2.VideoCapture(binary_video_path)
         ret, first_frame = cap.read()
         cap.release()
@@ -119,8 +124,19 @@ class PersonTracker(VideoUtils):
         
         # Get bounding box coordinates
         min_y, max_y = np.min(indices[:, 0]), np.max(indices[:, 0])
-        min_x, max_x = np.min(indices[:, 1]) + 20, np.max(indices[:, 1]) - 75
+        min_x, max_x = np.min(indices[:, 1]), np.max(indices[:, 1])
         
+        # Reduce bounding box size by 15% width and 10% height
+        width = max_x - min_x
+        height = max_y - min_y
+        width_reduction = int(width * 0.15)
+        height_reduction = int(height * 0.1)
+        
+        min_x += width_reduction
+        max_x -= width_reduction
+        min_y += height_reduction
+        max_y -= height_reduction
+
         # Convert to center + half dimensions format
         x_center = (min_x + max_x) // 2
         y_center = (min_y + max_y) // 2
@@ -241,7 +257,7 @@ class PersonTracker(VideoUtils):
         weights = np.zeros(particles.shape[1])
         
         for i in range(particles.shape[1]):
-            particle_histogram = self.compute_normalized_histogram(frame, particles[:, i])
+            particle_histogram = self.compute_normalized_histogram(frame, particles[:4, i])
             color_similarity = self.bhattacharyya_distance(particle_histogram, target_histogram)
             weights[i] = color_similarity ** 0.5
         
