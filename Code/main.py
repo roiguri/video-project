@@ -8,23 +8,23 @@ from matting import VideoMatter
 from tracking import PersonTracker
 
 # Configuration - Change these to YES/NO to control which stages run
-RUN_STABILIZATION = "NO"
-RUN_BACKGROUND_SUB = "NO"
+RUN_STABILIZATION = "YES"
+RUN_BACKGROUND_SUB = "YES"
 RUN_MATTING = "YES"
-RUN_TRACKING = "NO"
+RUN_TRACKING = "YES"
 
 def main():
     print("=== Video Processing Project Started ===")
     start_time = time.time()
     
     try:
-        # Student IDs for output file naming
-        ID1, ID2, ID3 = "123456789", "987654321", "111222333"
+        # IDs for output file naming
+        ID1, ID2, ID3 = "211314471", "211360136", "318835816"
         os.makedirs('Outputs', exist_ok=True)
         
         utils = VideoUtils()
-        input_video = 'Inputs/INPUT.avi'
-        background_img = 'Inputs/background.jpg'
+        input_video = 'Input/INPUT.avi'
+        background_img = 'Input/background.jpg'
         
         output_files = {
             'stabilize': f'Outputs/stabilize_{ID1}_{ID2}_{ID3}.avi',

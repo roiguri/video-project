@@ -51,11 +51,11 @@ class VideoMatter(VideoUtils):
             trimap = np.zeros_like(gray_mask)
             alpha = np.zeros_like(gray_mask)
             
-            # Create initial region masks
-            foreground_region[gray_mask >= 240] = 255
-            background_region[gray_mask <= 10] = 255
+            # Create initial region masks from binary mask
+            foreground_region[gray_mask >= 240] = 255  # High confidence foreground
+            background_region[gray_mask <= 10] = 255   # High confidence background
             
-            # Phase 1: Initial computation
+            # Phase 1: Initial computation using rough regions
             fg_prob, bg_prob = self.compute_region_probabilities(
                 frame, background_region, foreground_region,
                 CROP_VERTICAL_RADIUS, CROP_HORIZONTAL_RADIUS)
@@ -64,22 +64,23 @@ class VideoMatter(VideoUtils):
             bg_seed_locations = np.where(background_region == 255)
             
             if len(fg_seed_locations[0]) > 0 and len(bg_seed_locations[0]) > 0:
-                fg_distance_map = self.calculate_geodesic_distance(fg_seed_locations, (h, w))
-                bg_distance_map = self.calculate_geodesic_distance(bg_seed_locations, (h, w))
+                # Calculate distance maps from foreground and background seed points
+                fg_distance_map = self.calculate_distance(fg_seed_locations, (h, w))
+                bg_distance_map = self.calculate_distance(bg_seed_locations, (h, w))
                 
-                # Generate trimap
-                trimap[(fg_distance_map - bg_distance_map) > SEPARATION_THRESHOLD] = 0
-                trimap[(bg_distance_map - fg_distance_map) > SEPARATION_THRESHOLD] = 255
-                trimap[abs(bg_distance_map - fg_distance_map) <= SEPARATION_THRESHOLD] = 128
+                # Generate trimap based on distance comparison
+                trimap[(fg_distance_map - bg_distance_map) > SEPARATION_THRESHOLD] = 0    # Background
+                trimap[(bg_distance_map - fg_distance_map) > SEPARATION_THRESHOLD] = 255  # Foreground
+                trimap[abs(bg_distance_map - fg_distance_map) <= SEPARATION_THRESHOLD] = 128  # Unknown
                 
-                # Update region masks
+                # Update region masks based on trimap
                 background_region = np.zeros_like(gray_mask)
                 foreground_region = np.zeros_like(gray_mask)
                 
                 foreground_region[trimap == 255] = 255
                 background_region[trimap == 0] = 255
                 
-                # Phase 2: Refined computation
+                # Phase 2: Refined computation with better region definitions
                 fg_prob, bg_prob = self.compute_region_probabilities(
                     frame, background_region, foreground_region,
                     CROP_VERTICAL_RADIUS, CROP_HORIZONTAL_RADIUS)
@@ -88,39 +89,41 @@ class VideoMatter(VideoUtils):
                 new_bg_seed_locations = np.where(background_region == 255)
                 
                 if len(new_fg_seed_locations[0]) > 0 and len(new_bg_seed_locations[0]) > 0:
-                    fg_distance_map = self.calculate_geodesic_distance(new_fg_seed_locations, (h, w))
-                    bg_distance_map = self.calculate_geodesic_distance(new_bg_seed_locations, (h, w))
+                    # Recalculate distance maps with refined seed points
+                    fg_distance_map = self.calculate_distance(new_fg_seed_locations, (h, w))
+                    bg_distance_map = self.calculate_distance(new_bg_seed_locations, (h, w))
                     
-                    # Final trimap
+                    # Final trimap with refined boundaries
                     trimap[(fg_distance_map - bg_distance_map) >= SEPARATION_THRESHOLD] = 0
                     trimap[(bg_distance_map - fg_distance_map) >= SEPARATION_THRESHOLD] = 255
                     trimap[abs(bg_distance_map - fg_distance_map) < SEPARATION_THRESHOLD] = 0.5 * 256
                     
-                    # Calculate alpha weights
+                    # Calculate alpha weights combining distance and color probability
                     fg_weights = (fg_distance_map + EPSILON) ** (-DISTANCE_EXPONENT) * fg_prob
                     bg_weights = (bg_distance_map + EPSILON) ** (-DISTANCE_EXPONENT) * bg_prob
                     
-                    # Generate alpha
+                    # Generate alpha matte using weighted combination
                     alpha = fg_weights / (fg_weights + bg_weights + EPSILON)
-                    alpha[trimap == 255] = 1
-                    alpha[trimap == 0] = 0
+                    alpha[trimap == 255] = 1  # Definite foreground
+                    alpha[trimap == 0] = 0    # Definite background
                 else:
                     alpha = trimap.astype(np.float64) / 255.0
             else:
                 trimap = gray_mask
                 alpha = gray_mask.astype(np.float64) / 255.0
             
-            # Composite frame in HSV space
+            # Composite frame in HSV space for better color blending
             result = np.zeros_like(frame)
             result_hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV)
             frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             bg_hsv = cv2.cvtColor(bg_image, cv2.COLOR_BGR2HSV)
             
-            result_hsv[:, :, 0] = alpha * frame_hsv[:, :, 0] + (1 - alpha) * bg_hsv[:, :, 0]
-            result_hsv[:, :, 1] = alpha * frame_hsv[:, :, 1] + (1 - alpha) * bg_hsv[:, :, 1]
-            result_hsv[:, :, 2] = alpha * frame_hsv[:, :, 2] + (1 - alpha) * bg_hsv[:, :, 2]
+            # Alpha blend each HSV channel separately
+            result_hsv[:, :, 0] = alpha * frame_hsv[:, :, 0] + (1 - alpha) * bg_hsv[:, :, 0]  # Hue
+            result_hsv[:, :, 1] = alpha * frame_hsv[:, :, 1] + (1 - alpha) * bg_hsv[:, :, 1]  # Saturation
+            result_hsv[:, :, 2] = alpha * frame_hsv[:, :, 2] + (1 - alpha) * bg_hsv[:, :, 2]  # Value
             
-            # Convert outputs
+            # Convert outputs to BGR for saving
             alpha_img = (alpha * 255).astype(np.uint8)
             alpha_bgr = cv2.cvtColor(alpha_img, cv2.COLOR_GRAY2BGR)
             result_bgr = cv2.cvtColor(result_hsv, cv2.COLOR_HSV2BGR)
@@ -153,15 +156,15 @@ class VideoMatter(VideoUtils):
         return fg_prob, bg_prob
     
     def estimate_color_densities(self, hsv, foreground_region, background_region, v_radius, h_radius):
-        """Estimate color density functions"""
-        # Downsample for efficiency
+        """Estimate color density functions using KDE on saturation channel"""
+        # Downsample for computational efficiency
         small_hsv = cv2.resize(hsv, (hsv.shape[1] // 4, hsv.shape[0] // 4))
         small_fg = cv2.resize(foreground_region, (foreground_region.shape[1] // 4, foreground_region.shape[0] // 4))
         small_bg = cv2.resize(background_region, (background_region.shape[1] // 4, background_region.shape[0] // 4))
         v_small = v_radius // 4
         h_small = h_radius // 4
         
-        # Locate object center
+        # Locate object center from foreground region
         rows, cols = np.where(small_fg == 255)
         if len(rows) == 0:
             return np.ones(256), np.ones(256)
@@ -169,7 +172,7 @@ class VideoMatter(VideoUtils):
         center_y = int(np.mean(rows))
         center_x = int(np.mean(cols))
         
-        # Extract region of interest
+        # Extract focused region of interest around object center
         y1, y2 = max(center_y - v_small, 0), min(center_y + v_small, small_fg.shape[0])
         x1, x2 = max(center_x - h_small, 0), min(center_x + h_small, small_fg.shape[1])
         
@@ -177,35 +180,35 @@ class VideoMatter(VideoUtils):
         window_fg = small_fg[y1:y2, x1:x2]
         window_bg = small_bg[y1:y2, x1:x2]
         
-        # Generate evaluation grid
+        # Generate evaluation grid for saturation values (0-255)
         eval_range = np.linspace(0, 255, 256)
         _, sat_channel, _ = cv2.split(window_hsv)
         
-        # Calculate foreground density
+        # Calculate foreground color density from saturation values
         fg_y, fg_x = np.where(window_fg == 255)
         if len(fg_y) > 0:
             fg_sat_data = sat_channel[fg_y, fg_x]
             try:
                 fg_density = self.calculate_kde(fg_sat_data, eval_range)
             except:
-                fg_density = np.ones(256)
+                fg_density = np.ones(256)  # Fallback to uniform distribution
         else:
             fg_density = np.ones(256)
             
-        # Calculate background density
+        # Calculate background color density from saturation values
         bg_y, bg_x = np.where(window_bg == 255)
         if len(bg_y) > 0:
             bg_sat_data = sat_channel[bg_y, bg_x]
             try:
                 bg_density = self.calculate_kde(bg_sat_data, eval_range)
             except:
-                bg_density = np.ones(256)
+                bg_density = np.ones(256)  # Fallback to uniform distribution
         else:
             bg_density = np.ones(256)
             
         return fg_density, bg_density
     
-    def calculate_geodesic_distance(self, seeds, shape):
+    def calculate_distance(self, seeds, shape):
         """Calculate distance from seed locations"""
         if len(seeds) == 0 or len(seeds[0]) == 0:
             return np.ones(shape) * np.inf

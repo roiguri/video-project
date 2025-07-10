@@ -15,9 +15,6 @@ RESAMPLE_THRESHOLD = 0.5
 
 # Default and fallback parameters
 DEFAULT_DETECTION = [100, 100, 50, 100]  # [x_center, y_center, half_width, half_height]
-EDGE_THRESHOLD = 10
-RESET_PARTICLE_RATIO = 0.3
-RESET_NOISE_STD = 100
 MIN_HALF_WIDTH = 10
 MIN_HALF_HEIGHT = 20
 
@@ -72,14 +69,6 @@ class PersonTracker(VideoUtils):
                 # Update target histogram every frame
                 target_histogram = self.compute_normalized_histogram(frame, current_detection)
                 
-                # Fallback: if tracking drifts too far from reasonable bounds, reset some particles
-                frame_center_x, frame_center_y = frame.shape[1] // 2, frame.shape[0] // 2
-                if (current_detection[0] < EDGE_THRESHOLD or current_detection[0] > frame.shape[1] - EDGE_THRESHOLD or 
-                    current_detection[1] < EDGE_THRESHOLD or current_detection[1] > frame.shape[0] - EDGE_THRESHOLD):
-                    # Reset particles to center area
-                    reset_count = int(RESET_PARTICLE_RATIO * particles.shape[1])
-                    particles[0, :reset_count] = (frame_center_x + np.random.normal(0, RESET_NOISE_STD, reset_count)).astype(int)
-                    particles[1, :reset_count] = (frame_center_y + np.random.normal(0, RESET_NOISE_STD, reset_count)).astype(int)
                 
                 # Resample particles
                 particles = self.resample_particles(particles, weights)
